@@ -34,7 +34,7 @@ LAST = "https://49208.com/unite49/h5/index/lastLotteryRecord?lotteryType=%d" % L
 RANK = ("%s/forums/h5/prediction/rank?lotteryType=%d&predictionTypeId=%d"
         "&type=1&pageNum=%d&pageSize=20")
 DETAIL = ("%s/forums/h5/prediction/prediction/detail?userId=%s"
-          "&predictionTypeId=%d&lotteryType=%d&pageNum=1&pageSize=15")
+          "&predictionTypeId=%d&lotteryType=%d&pageNum=1&pageSize=500")
 
 ZODIAC = ["鼠", "牛", "虎", "兔", "龙", "蛇", "马", "羊", "猴", "鸡", "狗", "猪"]
 CTX = ssl.create_default_context()
@@ -140,7 +140,11 @@ def main():
     n = 0
 
     def work(uid):
-        return pick_of(host, uid, cur, year)
+        # 单人失败（重试耗尽）不该拖垮整期：当作"无当期记录"处理
+        try:
+            return pick_of(host, uid, cur, year)
+        except Exception:
+            return None
 
     with ThreadPoolExecutor(max_workers=8) as ex:
         for vals in ex.map(work, uids):
@@ -150,6 +154,11 @@ def main():
             for z in vals:
                 if z in votes:
                     votes[z] += 1
+
+    # 无人有当期记录（多为刚开奖、新期还没人投票）→ 不写空记录
+    if n <= 0:
+        print("WARN: 当期%d 暂无选肖记录（可能刚开期），跳过本次写入" % cur)
+        sys.exit(0)
 
     now = datetime.now(CST).replace(microsecond=0)
     rec = {
