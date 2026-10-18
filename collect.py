@@ -151,8 +151,9 @@ def main():
                 if z in votes:
                     votes[z] += 1
 
+    now = datetime.now(CST).replace(microsecond=0)
     rec = {
-        "t": datetime.now(CST).replace(microsecond=0).isoformat(),
+        "t": now.isoformat(),
         "period": cur,
         "drawAt": draw,
         "board": len(uids),
@@ -168,8 +169,16 @@ def main():
                 arr = json.load(f)
         except Exception:
             arr = []
-    # 同一小时重复跑（手动触发/重试）→ 覆盖该小时最后一条
-    if arr and isinstance(arr[-1], dict) and arr[-1].get("t", "")[:13] == rec["t"][:13]:
+    # 去重：与上一条间隔 < 2 分钟（重复跑 / 手动重试）→ 覆盖；否则追加
+    # （开奖前密集窗口每 5 分钟一条，必须保留，不能按小时塌掉）
+    dup = False
+    if arr and isinstance(arr[-1], dict) and arr[-1].get("period") == cur:
+        try:
+            if (now - datetime.fromisoformat(arr[-1]["t"])).total_seconds() < 120:
+                dup = True
+        except Exception:
+            pass
+    if dup:
         arr[-1] = rec
     else:
         arr.append(rec)
