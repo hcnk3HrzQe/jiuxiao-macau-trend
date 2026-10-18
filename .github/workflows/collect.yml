@@ -2,8 +2,10 @@ name: collect
 
 on:
   schedule:
-    # 每小时整点（UTC）。GitHub 定时可能有几分钟延迟，属正常
-    - cron: "0 * * * *"
+    # 错开整点躲开 GitHub 调度高峰（文档：整点高负载，任务会被延迟甚至丢弃）
+    # :23 主点位 + :53 备用；脚本内置「同小时去重」→ 每小时仍只留 1 条
+    - cron: "23 * * * *"
+    - cron: "53 * * * *"
   workflow_dispatch: {}
 
 permissions:
