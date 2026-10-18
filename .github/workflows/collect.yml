@@ -1,0 +1,40 @@
+name: collect
+
+on:
+  schedule:
+    # 每小时整点（UTC）。GitHub 定时可能有几分钟延迟，属正常
+    - cron: "0 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+# 防两次运行重叠打架
+concurrency:
+  group: collect
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 抓取一期快照
+        run: python3 collect.py
+
+      - name: 提交回库
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data
+          if git diff --cached --quiet; then
+            echo "无变化，跳过提交"
+          else
+            git commit -m "auto: $(TZ=Asia/Shanghai date +%F' '%H:%M) 快照"
+            git push
+          fi
