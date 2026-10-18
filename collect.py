@@ -41,7 +41,7 @@ CTX = ssl.create_default_context()
 
 
 def get(url, tries=3):
-    """带递增退避的重试：失败后等 2s、4s… 再重拉（最后一次失败不再空等）。"""
+    """带递增退避的重试：失败后等 10s、30s… 再重拉（最后一次失败不再空等）。"""
     err = None
     for i in range(tries):
         try:
@@ -55,8 +55,8 @@ def get(url, tries=3):
             return json.loads(b.decode("utf-8"))
         except Exception as e:
             err = e
-            if i < tries - 1:                 # 还有下一次才等：2s → 4s → 8s…
-                time.sleep(min(2 * (2 ** i), 8))
+            if i < tries - 1:                 # 还有下一次才等：10s → 30s → 90s…（上限 120s）
+                time.sleep(min(10 * (3 ** i), 120))
     raise err
 
 
