@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
-"""澳门·九肖中特(tid=31, lt=2) 连中榜 —— 每小时快照，一期一个文件。
+"""澳门·九肖中特(tid=31, lt=2) 连中榜 + 家禽野兽(tid=62) —— 每小时快照，一期一个文件。
 
 数据来源：第三方论坛只读接口（GET）。
   1. apiHost                                -> 动态域名 forumUrlForH5
   2. lastLotteryRecord?lotteryType=2        -> 当期 nextLotteryNumber / 开奖时刻 title
   3. prediction/rank  type=1 tid=31 lt=2    -> 连中榜名单（board 人数）
   4. prediction/detail userId=...           -> 每人全史选肖（取当期累加票数）
+  5. predictionList?title=家禽野兽          -> 家禽野兽玩法当期发帖列表（全量发帖人）
+  6. prediction/detail tid=62               -> 每人当期选「家禽/野兽」
 
 输出：data/{期号:04d}.json —— JSON 数组，每小时末尾追加一条记录：
-  {"t","period","drawAt","board","n","votes"}
+  {"t","period","drawAt","board","n","votes","jqys"}
+  其中外层 board/n/votes = 九肖连中榜（成员口径）；
+  jqys = 家禽野兽 {"n","votes":{"家禽","野兽"}}（全量发帖人口径）。
+  ⚠ 两者人群不同（连中榜成员 vs 全部发帖人），故分开存放，勿混算。
 """
 import gzip
 import json
@@ -17,6 +22,7 @@ import re
 import ssl
 import sys
 import time
+import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
@@ -27,6 +33,7 @@ DATA = os.path.join(ROOT, "data")
 
 LT = 2          # 2 = 澳门
 TID = 31        # 31 = 九肖中特
+TID2 = 62       # 62 = 家禽野兽
 UA = "Mozilla/5.0 (Linux; Android 13)"
 
 API_HOST = "https://49208.com/unite49/h5/index/apiHost"
@@ -35,6 +42,10 @@ RANK = ("%s/forums/h5/prediction/rank?lotteryType=%d&predictionTypeId=%d"
         "&type=1&pageNum=%d&pageSize=20")
 DETAIL = ("%s/forums/h5/prediction/prediction/detail?userId=%s"
           "&predictionTypeId=%d&lotteryType=%d&pageNum=1&pageSize=500")
+# 家禽野兽：论坛搜索框按标题检索（pageSize 被服务端忽略，固定每页 15 条）
+LIST = ("%s/forums/h5/prediction/predictionList?lotteryType=%d"
+        "&pageNum=%d&pageSize=15&title=%s")
+JQYS_KW = urllib.parse.quote("家禽野兽")
 
 ZODIAC = ["鼠", "牛", "虎", "兔", "龙", "蛇", "马", "羊", "猴", "鸡", "狗", "猪"]
 CTX = ssl.create_default_context()
@@ -117,6 +128,63 @@ def pick_of(host, uid, period, year):
     return None
 
 
+def jqys_tally(host, cur, year):
+    """家禽野兽(tid=62)：论坛搜索列表(标题=家禽野兽) -> 逐人详情取 家禽/野兽 -> 汇总。
+
+    与九肖不同，这里的人群是「该玩法当期全部发帖人」（不是榜单成员）。
+    返回 (n, {"家禽":x,"野兽":y})。
+    """
+    posts = {}                                   # predictionId -> item（去重）
+    for p in range(1, 8):
+        d = get(LIST % (host, LT, p, JQYS_KW))["data"]
+        lst = d.get("list") or []
+        if not lst:
+            break
+        all_older = True
+        for it in lst:
+            m = re.match(r"^(\d+)期", it.get("title") or "")
+            per = int(m.group(1)) if m else int(it.get("number") or 0)
+            if per >= cur:
+                all_older = False
+            if per == cur:
+                pid = str(it.get("predictionId", "") or "")
+                if pid:
+                    posts[pid] = it
+        if all_older:                            # 本页已全是旧期 -> 到底
+            break
+        time.sleep(0.12)
+
+    def vote(item):
+        uid = str(item[1].get("userId", "") or "")
+        if not uid:
+            return None
+        try:
+            d = get(DETAIL % (host, uid, TID2, LT))["data"]
+        except Exception:
+            return None                          # 单人失败不拖垮
+        for r in (d.get("list") or []):
+            if int(r.get("period") or 0) != cur:
+                continue
+            if not str(r.get("predictionId", "")).startswith(str(year)):
+                continue
+            for x in (r.get("detailList") or []):
+                v = x.get("value")
+                if isinstance(v, list) and v:
+                    return str(v[0])
+                if isinstance(v, str) and v:
+                    return v
+        return None
+
+    counts = {}
+    n = 0
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        for v in ex.map(vote, list(posts.items())):
+            if v:
+                n += 1
+                counts[v] = counts.get(v, 0) + 1
+    return n, {"家禽": counts.get("家禽", 0), "野兽": counts.get("野兽", 0)}
+
+
 def main():
     os.makedirs(DATA, exist_ok=True)
 
@@ -157,9 +225,16 @@ def main():
                 if z in votes:
                     votes[z] += 1
 
-    # 无人有当期记录（多为刚开奖、新期还没人投票）→ 不写空记录
-    if n <= 0:
-        print("WARN: 当期%d 暂无选肖记录（可能刚开期），跳过本次写入" % cur)
+    # 家禽野兽：全量发帖人口径。失败不影响九肖主流程。
+    jn, jvotes = 0, {"家禽": 0, "野兽": 0}
+    try:
+        jn, jvotes = jqys_tally(host, cur, year)
+    except Exception as e:
+        print("WARN: 家禽野兽抓取失败:", e)
+
+    # 两条流都空（多为刚开奖、新期还没人投票）→ 不写空记录
+    if n <= 0 and jn <= 0:
+        print("WARN: 当期%d 暂无选肖/家禽野兽记录（可能刚开期），跳过本次写入" % cur)
         sys.exit(0)
 
     now = datetime.now(CST).replace(microsecond=0)
@@ -170,6 +245,7 @@ def main():
         "board": len(uids),
         "n": n,
         "votes": votes,
+        "jqys": {"n": jn, "votes": jvotes},
     }
 
     path = os.path.join(DATA, "%04d.json" % cur)
@@ -198,7 +274,8 @@ def main():
         f.write("[\n" + lines + "\n]\n")
 
     top = sorted(votes.items(), key=lambda x: -x[1])[:3]
-    print("期%d board=%d n=%d drawAt=%s top3=%s" % (cur, len(uids), n, draw, top))
+    print("期%d board=%d n=%d drawAt=%s top3=%s | 家禽野兽 n=%d %s"
+          % (cur, len(uids), n, draw, top, jn, jvotes))
 
 
 if __name__ == "__main__":
