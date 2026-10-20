@@ -61,6 +61,11 @@ CTX = ssl.create_default_context()
 # 澳门那份仍是 120s（它有每 5 分钟密档，不能放宽），两份互不影响。
 DUP_WINDOW = 1200
 
+# 收人窗口：标题搜往前多收 6 期的发帖人，票数仍只按当期 detail 聚合。
+# ⚠ 不收跨期就漏人：部分当期帖标题不含「家禽野兽」，只能靠其更早帖把 uid 捞进来
+#   （实测 112 期：只搜当期=16人 8/8；往前 3 期=27人 → 10/14=24，与 App 一致）
+JQYS_WINDOW = 6
+
 
 def get(url, tries=3):
     """带递增退避的重试：失败后等 10s、30s… 再重拉（最后一次失败不再空等）。"""
@@ -151,13 +156,14 @@ def jqys_tally(host, cur, year):
         lst = d.get("list") or []
         if not lst:
             break
+        floor = max(1, cur - JQYS_WINDOW)          # 收人窗口下界（跨年不越界）
         all_older = True
         for it in lst:
             m = re.match(r"^(\d+)期", it.get("title") or "")
             per = int(m.group(1)) if m else int(it.get("number") or 0)
-            if per >= cur:
+            if per >= floor:
                 all_older = False
-            if per == cur:
+            if per >= floor:
                 pid = str(it.get("predictionId", "") or "")
                 if pid:
                     posts[pid] = it
@@ -165,8 +171,15 @@ def jqys_tally(host, cur, year):
             break
         time.sleep(0.12)
 
-    def vote(item):
-        uid = str(item[1].get("userId", "") or "")
+    # 人池去重（App 同款 LinkedHashSet）：同一人跨多期发帖只能算一次，否则重复计票
+    uid_list, seen = [], set()
+    for _, it in posts.items():
+        u = str(it.get("userId", "") or "")
+        if u and u not in seen:
+            seen.add(u)
+            uid_list.append(u)
+
+    def vote(uid):
         if not uid:
             return None
         try:
@@ -189,7 +202,7 @@ def jqys_tally(host, cur, year):
     counts = {}
     n = 0
     with ThreadPoolExecutor(max_workers=6) as ex:
-        for v in ex.map(vote, list(posts.items())):
+        for v in ex.map(vote, uid_list):
             if v:
                 n += 1
                 counts[v] = counts.get(v, 0) + 1
