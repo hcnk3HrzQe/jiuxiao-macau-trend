@@ -1,2 +1,5 @@
 __pycache__/
 *.pyc
+
+# Cloudflare API token（明文绝不入库，与主仓 app/gh_token.txt 同模式）
+cf_token.txt

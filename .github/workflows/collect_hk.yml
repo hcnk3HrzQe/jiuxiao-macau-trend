@@ -1,0 +1,61 @@
+name: collect-hk
+
+on:
+  schedule:
+    # 香港（lt=1）专用：每天 CST 0/3/6/9/12/15/18/21 点共 8 档
+    # GitHub 用 UTC，东八区换算 = UTC 16/19/22/1/4/7/10/13 的整点
+    - cron: "0 16 * * *"   # CST 00:00
+    - cron: "0 19 * * *"   # CST 03:00
+    - cron: "0 22 * * *"   # CST 06:00
+    - cron: "0 1 * * *"    # CST 09:00
+    - cron: "0 4 * * *"    # CST 12:00
+    - cron: "0 7 * * *"    # CST 15:00
+    - cron: "0 10 * * *"   # CST 18:00
+    - cron: "0 13 * * *"   # CST 21:00
+    # 不加冗余档、不加开奖前密档（主人明确：没说的一律不要）
+    workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+# 与 collect.yml 分组，避免两个 workflow 同时运行互相取消
+concurrency:
+  group: collect-hk
+  cancel-in-progress: false
+
+jobs:
+  collect-hk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 抓取香港一期快照
+        run: python3 collect_hk.py
+
+      - name: 提交回库
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data_hk 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "无变化，跳过提交"
+            exit 0
+          fi
+          git commit -m "auto(hk): $(TZ=Asia/Shanghai date +%F' '%H:%M) 香港快照"
+          # 与 collect.yml 同分支：两边都可能在推，rebase 后重试最多 3 次
+          for i in 1 2 3; do
+            git rebase --abort 2>/dev/null || true
+            if git pull --rebase origin main && git push; then
+              echo "推送成功（第 $i 次）"
+              exit 0
+            fi
+            echo "push 第 $i 次失败，20s 后重试"
+            sleep 20
+          done
+          echo "推送失败"
+          exit 1
