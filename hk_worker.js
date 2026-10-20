@@ -23,13 +23,21 @@ export default {
   async scheduled(event, env, ctx) {
     ctx.waitUntil(
       (async () => {
-        const res = await trigger(env);
-        console.log("cron dispatch ->", res.status, res.body);
+        try {
+          const res = await trigger(env);
+          console.log("cron dispatch ->", res.status, res.body);
+        } catch (e) {
+          console.log("cron dispatch ERR ->", e && e.message);
+        }
       })()
     );
   },
   async fetch(request, env) {
-    const res = await trigger(env);
-    return new Response(`dispatch ${res.status}: ${res.body}\n`, { status: 200 });
+    try {
+      const res = await trigger(env);
+      return new Response(`dispatch ${res.status}: ${res.body}\n`, { status: 200 });
+    } catch (e) {
+      return new Response(`ERR ${e && e.message} | ${e && e.stack}\n`, { status: 200 });
+    }
   },
 };

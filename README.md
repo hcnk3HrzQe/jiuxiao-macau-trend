@@ -113,6 +113,12 @@ python3 collect_hk.py          # 手动跑一次香港快照 → data_hk/{期号
 > 香港示例记录（首条，2026-10-20 实跑）：
 > `{"t":"2026-10-20T12:00:39+08:00","period":112,"drawAt":"2026-10-20T21:32:00+08:00","board":395,"n":394,"votes":{…},"jqys":{"n":16,"votes":{"家禽":8,"野兽":8}}}`
 
+### 已知限制（香港线）
+
+- **CF Worker `hk-snap-timer` 的网页手动触发分支（`GET https://hk-snap-timer.jqys-snap.workers.dev/`）返回 404 / `error code: 1042`**：官方错误码表里 1042 =「Worker 试图 fetch 同 zone 的另一个 Worker」，社区已知新建 Worker 开 workers.dev 后会**在进入 handler 之前**就 1042（无任何调用记录）。已按官方建议加 `global_fetch_strictly_public` 兼容标志，HTTP 路径仍未通。
+  - **不影响兜底**：cron（`scheduled`）不走 workers.dev 的 HTTP 路由，是 CF 调度器直接调起；**验证方式 = 看 GitHub 上到点是否出现 `event=workflow_dispatch` 的 collect-hk run**（schedule 触发的是 `event=schedule`，两者可区分）。
+  - 网页手动触发只是**测试用**，主链路是 cron + GitHub schedule 双保险。
+
 ## 关联
 
 - 配套 Android App「高手榜 · 二波中特」（私有仓库 `forumbet-rank`）：本库抓取的是该 App「连中榜」页（`PredictPanel`）同源的**澳门九肖中特**数据。

@@ -48,7 +48,7 @@ for s in (d.get('result') or {}).get('schedules') or []: print('   -',s['cron'])
 
 echo "== 1) 上传 hk_worker.js（只针对 $WNAME） =="
 auth -X PUT "$API/accounts/$AID/workers/scripts/$WNAME" \
-  -F 'metadata={"main_module":"worker.js","compatibility_date":"2024-01-01"};type=application/json' \
+  -F 'metadata={"main_module":"worker.js","compatibility_date":"2024-01-01","compatibility_flags":["global_fetch_strictly_public"]};type=application/json' \
   -F "worker.js=@$ROOT/hk_worker.js;filename=worker.js;type=application/javascript+module" | J
 
 echo "== 2) 绑定 GH_TOKEN（新 Worker） =="
