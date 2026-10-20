@@ -40,10 +40,27 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data
-          if git diff --cached --quiet; then
-            echo "无变化，跳过提交"
-          else
+          push_once() {
+            git add data
+            if git diff --cached --quiet; then
+              echo "无变化，跳过提交"
+              return 0
+            fi
             git commit -m "auto: $(TZ=Asia/Shanghai date +%F' '%H:%M) 快照"
             git push
-          fi
+          }
+          # 澳门/香港两条线共用 main：被抢先推送 -> 同步远端 + 重新采集后再推，最多 4 次
+          for i in 1 2 3 4; do
+            if push_once; then
+              echo "推送成功（第 $i 次）"
+              exit 0
+            fi
+            echo "push 第 $i 次被拒 -> 同步远端并重新采集"
+            git fetch origin main
+            git rebase --abort 2>/dev/null || true
+            git reset --hard origin/main
+            python3 collect.py
+            sleep 5
+          done
+          echo "推送失败"
+          exit 1
